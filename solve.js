@@ -71,10 +71,9 @@ function wordsCount(s) {
   let inW = false;
   for (let i = 0; i < s.length; i++) {
     const cc = s.charCodeAt(i);
-    // JS \s: ASCII whitespace (cc <= 32 covers space \t \n \v \f \r) plus the
-    // Unicode spaces below; inlined here instead of a call per character.
-    const ws = cc <= 32 || cc === 160 || cc === 0x1680 || (cc >= 0x2000 && cc <= 0x200a) ||
-      cc === 0x2028 || cc === 0x2029 || cc === 0x202f || cc === 0x205f || cc === 0x3000 || cc === 0xfeff;
+    // JS \s: ASCII whitespace is all <= 32; the Unicode spaces are >= 128.
+    const ws = cc <= 32 || (cc >= 128 && (cc === 160 || cc === 0x1680 || (cc >= 0x2000 && cc <= 0x200a) ||
+      cc === 0x2028 || cc === 0x2029 || cc === 0x202f || cc === 0x205f || cc === 0x3000 || cc === 0xfeff));
     if (ws) inW = false;
     else if (!inW) { inW = true; n++; }
   }
@@ -333,98 +332,118 @@ function findSingleStar(s, from) {
   return -1;
 }
 
-/** `s[a..b)` HTML-escaped into `out`, one pass, no regular expression. */
+/** `s[a..b)` HTML-escaped into `out`; the next special is found by native search. */
 function escInto(out, s, a, b) {
   let start = a;
-  for (let i = a; i < b; i++) {
-    const c = s[i];
-    let e;
-    if (c === '&') e = '&amp;';
-    else if (c === '<') e = '&lt;';
-    else if (c === '>') e = '&gt;';
-    else if (c === '"') e = '&quot;';
-    else if (c === "'") e = '&#39;';
-    else continue;
-    if (i > start) out.push(s.slice(start, i));
+  while (true) {
+    let j = b;
+    let e = '';
+    let k = s.indexOf('&', start);
+    if (k !== -1 && k < j) { j = k; e = '&amp;'; }
+    k = s.indexOf('<', start);
+    if (k !== -1 && k < j) { j = k; e = '&lt;'; }
+    k = s.indexOf('>', start);
+    if (k !== -1 && k < j) { j = k; e = '&gt;'; }
+    k = s.indexOf('"', start);
+    if (k !== -1 && k < j) { j = k; e = '&quot;'; }
+    k = s.indexOf("'", start);
+    if (k !== -1 && k < j) { j = k; e = '&#39;'; }
+    if (j >= b) break;
+    if (j > start) out.push(s.slice(start, j));
     out.push(e);
-    start = i + 1;
+    start = j + 1;
   }
   if (b > start) out.push(s.slice(start, b));
+}
+
+/** First markup character (`*`, backtick, `[`, backslash) in `s[from..to)`, or `to`. */
+function nextSpecial(s, from, to) {
+  let j = to;
+  let k = s.indexOf('*', from);
+  if (k !== -1 && k < j) j = k;
+  k = s.indexOf('`', from);
+  if (k !== -1 && k < j) j = k;
+  k = s.indexOf('[', from);
+  if (k !== -1 && k < j) j = k;
+  k = s.indexOf('\\', from);
+  if (k !== -1 && k < j) j = k;
+  return j;
 }
 
 /** Inline rendering of `s[a..b)` into `out`; ranges, never substrings. */
 function inlineInto(out, s, a, b, link) {
   let i = a;
   let lit = a; // start of the current literal run
-  const flush = (to) => { if (to > lit) escInto(out, s, lit, to); };
-  while (i < b) {
-    const c = s[i];
-    if (c === '\\' && i + 1 < b && ESCAPABLE.has(s[i + 1])) {
-      flush(i);
-      out.push(s[i + 1]);
-      i += 2;
+  while (true) {
+    const nx = nextSpecial(s, i, b);
+    if (nx >= b) break;
+    const c = s[nx];
+    if (c === '\\' && nx + 1 < b && ESCAPABLE.has(s[nx + 1])) {
+      if (nx > lit) escInto(out, s, lit, nx);
+      out.push(s[nx + 1]);
+      i = nx + 2;
       lit = i;
       continue;
     }
     if (c === '`') {
-      const j = s.indexOf('`', i + 1);
-      if (j !== -1 && j < b && j > i + 1) {
-        flush(i);
+      const j = s.indexOf('`', nx + 1);
+      if (j !== -1 && j < b && j > nx + 1) {
+        if (nx > lit) escInto(out, s, lit, nx);
         out.push('<code>');
-        escInto(out, s, i + 1, j);
+        escInto(out, s, nx + 1, j);
         out.push('</code>');
         i = j + 1;
         lit = i;
-      } else i++;
+      } else i = nx + 1;
       continue;
     }
     if (c === '*') {
-      if (s[i + 1] === '*') {
-        const j = findUnescaped(s, '**', i + 2);
-        if (j !== -1 && j < b && j > i + 2) {
-          flush(i);
+      if (s[nx + 1] === '*') {
+        const j = findUnescaped(s, '**', nx + 2);
+        if (j !== -1 && j < b && j > nx + 2) {
+          if (nx > lit) escInto(out, s, lit, nx);
           out.push('<strong>');
-          inlineInto(out, s, i + 2, j, link);
+          inlineInto(out, s, nx + 2, j, link);
           out.push('</strong>');
           i = j + 2;
           lit = i;
-        } else i += 2;
+        } else i = nx + 2;
         continue;
       }
-      const j = findSingleStar(s, i + 1);
-      if (j !== -1 && j < b && j > i + 1) {
-        flush(i);
+      const j = findSingleStar(s, nx + 1);
+      if (j !== -1 && j < b && j > nx + 1) {
+        if (nx > lit) escInto(out, s, lit, nx);
         out.push('<em>');
-        inlineInto(out, s, i + 1, j, link);
+        inlineInto(out, s, nx + 1, j, link);
         out.push('</em>');
         i = j + 1;
         lit = i;
-      } else i++;
+      } else i = nx + 1;
       continue;
     }
     if (c === '[') {
-      const k = findUnescaped(s, ']', i + 1);
+      const k = findUnescaped(s, ']', nx + 1);
       const m = k !== -1 && k < b && s[k + 1] === '(' ? s.indexOf(')', k + 2) : -1;
       const hasTarget = m !== -1 && m < b && m > k + 2;
       const target = hasTarget ? s.slice(k + 2, m) : '';
       if (hasTarget && !/\s/.test(target)) {
-        flush(i);
+        if (nx > lit) escInto(out, s, lit, nx);
         const href = link(target);
         out.push('<a href="');
         escInto(out, href, 0, href.length);
         out.push('">');
-        inlineInto(out, s, i + 1, k, link);
+        inlineInto(out, s, nx + 1, k, link);
         out.push('</a>');
         i = m + 1;
         lit = i;
         continue;
       }
-      i++;
+      i = nx + 1;
       continue;
     }
-    i++;
+    i = nx + 1;
   }
-  flush(b);
+  if (b > lit) escInto(out, s, lit, b);
 }
 
 function renderMarkdown(src, link, memo) {
