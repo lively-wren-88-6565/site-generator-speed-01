@@ -332,28 +332,28 @@ function findSingleStar(s, from) {
   return -1;
 }
 
-/** `s[a..b)` HTML-escaped into `out`; the next special is found by native search. */
+const ESC_TEST = /[&<>"']/;
+
+/** `s[a..b)` HTML-escaped into `out`. */
 function escInto(out, s, a, b) {
-  let start = a;
-  while (true) {
-    let j = b;
-    let e = '';
-    let k = s.indexOf('&', start);
-    if (k !== -1 && k < j) { j = k; e = '&amp;'; }
-    k = s.indexOf('<', start);
-    if (k !== -1 && k < j) { j = k; e = '&lt;'; }
-    k = s.indexOf('>', start);
-    if (k !== -1 && k < j) { j = k; e = '&gt;'; }
-    k = s.indexOf('"', start);
-    if (k !== -1 && k < j) { j = k; e = '&quot;'; }
-    k = s.indexOf("'", start);
-    if (k !== -1 && k < j) { j = k; e = '&#39;'; }
-    if (j >= b) break;
-    if (j > start) out.push(s.slice(start, j));
+  if (b <= a) return;
+  const seg = s.slice(a, b);
+  if (!ESC_TEST.test(seg)) { out.push(seg); return; }
+  let start = 0;
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    let e;
+    if (c === '&') e = '&amp;';
+    else if (c === '<') e = '&lt;';
+    else if (c === '>') e = '&gt;';
+    else if (c === '"') e = '&quot;';
+    else if (c === "'") e = '&#39;';
+    else continue;
+    if (i > start) out.push(seg.slice(start, i));
     out.push(e);
-    start = j + 1;
+    start = i + 1;
   }
-  if (b > start) out.push(s.slice(start, b));
+  if (seg.length > start) out.push(seg.slice(start));
 }
 
 /** First markup character (`*`, backtick, `[`, backslash) in `s[from..to)`, or `to`. */
